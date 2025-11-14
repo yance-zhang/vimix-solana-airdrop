@@ -70,15 +70,15 @@ const Home: FC = () => {
       // 将MerkleProofData转换为AirdropProof格式
       const airdropProof: AirdropProof = {
         address: walletAddress,
-        total: Number(leafData.amount) / LAMPORTS_PER_SOL,
-        unlocked: Number(leafData.amount) / LAMPORTS_PER_SOL,
+        total: Number(leafData.amount),
+        unlocked: Number(leafData.amount),
         claimed: '0',
         detail: {},
         proofs: [
           {
             phase: 1, // 默认phase为1，根据实际情况调整
             address: walletAddress,
-            amount: Number(leafData.amount) / LAMPORTS_PER_SOL,
+            amount: Number(leafData.amount),
             index: 0,
             proof: leafData.proof,
           },
@@ -281,9 +281,10 @@ const Home: FC = () => {
                     <div className="stat">
                       <div className="stat-title">Total Claimable</div>
                       <div className="stat-value text-primary">
-                        {proofData.proofs
-                          .reduce((sum, p) => sum + (p.amount || 0), 0)
-                          .toLocaleString()}
+                        {proofData.proofs.reduce(
+                          (sum, p) => sum + (p.amount || 0),
+                          0,
+                        ) / LAMPORTS_PER_SOL}
                       </div>
                       <div className="stat-desc">Tokens</div>
                     </div>
@@ -296,51 +297,6 @@ const Home: FC = () => {
                       <div className="stat-desc">Available to claim</div>
                     </div>
                   </div>
-
-                  {proofData.detail &&
-                    Object.keys(proofData.detail).length > 0 && (
-                      <div className="bg-base-100 p-4 rounded-lg">
-                        <p className="font-semibold mb-2">Breakdown:</p>
-                        <ul className="space-y-1 text-sm">
-                          {proofData.detail.launch_agent_token && (
-                            <li>
-                              • Launch Agent:{' '}
-                              {parseFloat(
-                                proofData.detail.launch_agent_token,
-                              ).toLocaleString()}{' '}
-                              tokens
-                            </li>
-                          )}
-                          {proofData.detail.burn_airdrop && (
-                            <li>
-                              • Burn Airdrop:{' '}
-                              {parseFloat(
-                                proofData.detail.burn_airdrop,
-                              ).toLocaleString()}{' '}
-                              tokens
-                            </li>
-                          )}
-                          {proofData.detail.nft_holder && (
-                            <li>
-                              • NFT Holder:{' '}
-                              {parseFloat(
-                                proofData.detail.nft_holder,
-                              ).toLocaleString()}{' '}
-                              tokens
-                            </li>
-                          )}
-                          {proofData.detail.stake_airdrop && (
-                            <li>
-                              • Stake Airdrop:{' '}
-                              {parseFloat(
-                                proofData.detail.stake_airdrop,
-                              ).toLocaleString()}{' '}
-                              tokens
-                            </li>
-                          )}
-                        </ul>
-                      </div>
-                    )}
 
                   <button
                     className="btn btn-primary w-full"
