@@ -1,7 +1,7 @@
 {
-  "address": "YPCKYGEpJ5YJ6VPjSp8XwyHwBfdtK7zr9niuRTS3aUt",
+  "address": "5hFNEgPoU55nCmohrdN6rGdAxqim32qtDzaMHnNiREzF",
   "metadata": {
-    "name": "holo_token_airdrop_solana",
+    "name": "vimix_airdrop",
     "version": "0.1.0",
     "spec": "0.1.0",
     "description": "Created with Anchor"
@@ -450,6 +450,10 @@
         }
       ],
       "args": [
+        {
+          "name": "_phase",
+          "type": "u8"
+        },
         {
           "name": "paused",
           "type": "bool"

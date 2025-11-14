@@ -66,18 +66,18 @@ export const stringToHex = (string: string) => {
 };
 
 export function checkSolanaAddress(address: string) {
-  // 检查长度
+  // Check length
   if (address.length < 43 || address.length > 48) {
     return { valid: false, reason: 'Invalid address length' };
   }
 
-  // 检查Base58字符
+  // Check Base58 characters
   const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
   if (!base58Regex.test(address)) {
     return { valid: false, reason: 'Invalid Base58 characters' };
   }
 
-  // 检查公钥有效性
+  // Check public key validity
   try {
     new PublicKey(address);
     return { valid: true, reason: 'Valid Solana address' };

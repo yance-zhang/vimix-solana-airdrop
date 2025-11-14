@@ -16,7 +16,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js';
-import IDL from './holo_token_airdrop_solana.json';
+import IDL from './airdrop_solana.json';
 import {
   MERKLE_ROOT_SEEDS,
   CLAIM_RECORD_SEEDS,
@@ -26,7 +26,7 @@ import {
   LutAddressMap,
 } from '../constants';
 
-// JSON文件的实际格式
+// Actual format of the JSON file
 export type MerkleProofData = {
   merkle_root: string;
   leaves: {
@@ -37,7 +37,7 @@ export type MerkleProofData = {
   };
 };
 
-// 原有的AirdropProof类型（向后兼容）
+// Original AirdropProof type (backward compatible)
 export type AirdropProof = {
   address: string;
   total: number;
@@ -143,6 +143,7 @@ export const useAirdropClaimOnSolana = () => {
     if (!publicKey) {
       return;
     }
+    // set program ID
     IDL.address = ProgramID.toBase58();
     const program = new Program(IDL as Idl, {
       connection,
@@ -156,13 +157,13 @@ export const useAirdropClaimOnSolana = () => {
         TOKEN_2022_PROGRAM_ID,
       );
 
-      let tx = newTransactionWithComputeUnitPriceAndLimit();
       const txSignatureList = [];
+
+      // handle multiple proofs
       for (let i = 0; i < proofInfo.proofs.length; i++) {
+        let tx = newTransactionWithComputeUnitPriceAndLimit();
         const currentProof = proofInfo.proofs[i];
-
         const phase = new BN(currentProof.phase);
-
         const lookupTableAccountResponse =
           await connection.getAddressLookupTable(LutAddressMap[phase]);
 
@@ -214,6 +215,7 @@ export const useAirdropClaimOnSolana = () => {
         );
         const proofBuf = Buffer.concat(proof);
 
+        // create claim instruction
         const inst = await program.methods
           .claimAirdrop(
             phase,
@@ -237,21 +239,18 @@ export const useAirdropClaimOnSolana = () => {
 
         const { blockhash } = await connection.getLatestBlockhash();
 
+        // convert to versioned transaction to reduce size
         const messageV0 = new TransactionMessage({
           payerKey: publicKey,
           recentBlockhash: blockhash,
           instructions: tx.instructions,
         }).compileToV0Message([lookupTableAccount]);
-
         const versionedTx = new VersionedTransaction(messageV0);
-
-        let txSignature = '';
 
         // Send transaction using Privy's sendTransaction
         const receipt = await sendTransaction(versionedTx, connection);
-        txSignature = receipt;
 
-        txSignatureList.push(txSignature);
+        txSignatureList.push(receipt);
       }
 
       return txSignatureList;
@@ -271,7 +270,7 @@ export const useAirdropClaimOnSolana = () => {
     if (!publicKey) {
       return;
     }
-
+    // set program ID
     IDL.address = ProgramID.toBase58();
     const program = new Program(IDL as Idl, {
       connection,
@@ -314,7 +313,7 @@ export const useAirdropClaimOnSolana = () => {
     if (!publicKey) {
       return;
     }
-
+    // set program ID
     IDL.address = ProgramID.toBase58();
     const program = new Program(IDL as Idl, {
       connection,
@@ -326,9 +325,7 @@ export const useAirdropClaimOnSolana = () => {
       true,
       TokenProgramId,
     );
-    console.log('userTokenVault: ', userTokenVault.toBase58());
-
-    let tx = newTransactionWithComputeUnitPriceAndLimit();
+    // console.log('userTokenVault: ', userTokenVault.toBase58());
 
     let verifyInstIdx = 2;
     const txSignatureList = [];
@@ -337,11 +334,12 @@ export const useAirdropClaimOnSolana = () => {
     // console.log('proofInfo: ', proofInfo);
 
     for (let i = 0; i < proofInfo.proofs.length; i++) {
+      let tx = newTransactionWithComputeUnitPriceAndLimit();
       const proof = proofInfo.proofs[i];
       const signed = signedData[i];
       const phase = new BN(proof.phase);
 
-      // console.log('正在从链上获取地址查找表账户...');
+      // console.log('Fetching address lookup table account from chain...');
       const lookupTableAccountResponse = await connection.getAddressLookupTable(
         LutAddressMap[phase],
       );
@@ -351,7 +349,7 @@ export const useAirdropClaimOnSolana = () => {
 
       if (!lookupTableAccount) {
         throw new Error(
-          `无法在链上找到地址查找表: ${LutAddressMap[phase].toBase58()}`,
+          `Unable to find address lookup table on-chain: ${LutAddressMap[phase].toBase58()}`,
         );
       }
 
@@ -436,6 +434,7 @@ export const useAirdropClaimOnSolana = () => {
 
       tx.add(verifySignInst);
 
+      // create claim instruction
       const inst = await program.methods
         .claimAirdropWithReceiver(
           phase,
@@ -463,43 +462,22 @@ export const useAirdropClaimOnSolana = () => {
 
       const { blockhash } = await connection.getLatestBlockhash();
 
-      // console.log(`blockhash: ${blockhash}`);
-
+      // convert to versioned transaction to reduce size
       const messageV0 = new TransactionMessage({
         payerKey: publicKey,
         recentBlockhash: blockhash,
         instructions: tx.instructions,
       }).compileToV0Message([lookupTableAccount]);
-
       const versionedTx = new VersionedTransaction(messageV0);
-      const serializedTx = versionedTx.serialize();
-      const txSize = serializedTx.length;
-
-      // console.log(`✅ 这笔版本化交易的大小是: ${txSize} 字节`);
 
       let txSignature = '';
 
       try {
-        // Sign transaction with wallet
-        // if (!signTransaction) {
-        //   throw new Error('Wallet does not support transaction signing');
-        // }
-        // const signedTx = await signTransaction(versionedTx);
-
-        // console.log(signedTx);
-
         // Send transaction
         txSignature = await sendTransaction(versionedTx, connection, {
           skipPreflight: true,
         });
         console.log(`Transaction sent: ${txSignature}`);
-
-        // Confirm transaction
-        // const confirmation = await connection.confirmTransaction(
-        //   txSignature,
-        //   'confirmed',
-        // );
-        // console.log('Transaction confirmed:', confirmation);
 
         txSignatureList.push(txSignature);
       } catch (error: any) {

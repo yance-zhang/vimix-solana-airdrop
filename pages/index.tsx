@@ -22,7 +22,9 @@ const Home: FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingProof, setIsFetchingProof] = useState(false);
   const [proofData, setProofData] = useState<AirdropProof | null>(null);
-  const { claimWithoutSignature } = useAirdropClaimOnSolana();
+  const [isAlreadyClaimed, setIsAlreadyClaimed] = useState(false);
+  const [claimedPhases, setClaimedPhases] = useState<number[]>([]);
+  const { claimWithoutSignature, checkClaimed } = useAirdropClaimOnSolana();
 
   // Fetch proof function
   const fetchAirdropProof = async (
@@ -51,7 +53,7 @@ const Home: FC = () => {
         data.leaves ? Object.keys(data.leaves).length : 0,
       );
 
-      // 检查当前钱包地址是否在leaves中
+      // Check if the current wallet address exists in leaves
       const leafData = data.leaves[walletAddress];
 
       if (!leafData) {
@@ -67,7 +69,7 @@ const Home: FC = () => {
       console.log('Amount:', leafData.amount);
       console.log('Proof array:', leafData.proof);
 
-      // 将MerkleProofData转换为AirdropProof格式
+      // Convert MerkleProofData to AirdropProof format
       const airdropProof: AirdropProof = {
         address: walletAddress,
         total: Number(leafData.amount),
@@ -76,7 +78,7 @@ const Home: FC = () => {
         detail: {},
         proofs: [
           {
-            phase: 1, // 默认phase为1，根据实际情况调整
+            phase: 1, // Default phase is 1, adjust according to actual situation
             address: walletAddress,
             amount: Number(leafData.amount),
             index: 0,
@@ -103,22 +105,57 @@ const Home: FC = () => {
         setIsFetchingProof(true);
         setProofData(null);
         setMessage(null);
+        setIsAlreadyClaimed(false);
+        setClaimedPhases([]);
 
         const proof = await fetchAirdropProof(publicKey.toBase58());
 
         if (proof) {
           setProofData(proof);
 
-          // Display info about available airdrops
+          // Check claim status for each phase
           if (proof.proofs && proof.proofs.length > 0) {
-            const totalAmount = proof.proofs.reduce((sum, p) => {
-              return sum + (p.amount || 0);
-            }, 0);
-
-            setMessage({
-              type: 'info',
-              text: `Found ${proof.proofs.length} airdrop phase(s) with total ${totalAmount.toLocaleString()} tokens available to claim!`,
+            const claimStatusPromises = proof.proofs.map(async (p) => {
+              const claimed = await checkClaimed({
+                phase: p.phase,
+                ownerAddress: publicKey,
+              });
+              return { phase: p.phase, claimed: claimed || false };
             });
+
+            const claimStatuses = await Promise.all(claimStatusPromises);
+            const claimed = claimStatuses.filter((s) => s.claimed);
+            const claimedPhaseNumbers = claimed.map((s) => s.phase);
+
+            setClaimedPhases(claimedPhaseNumbers);
+
+            const allClaimed = claimStatuses.every((s) => s.claimed);
+            setIsAlreadyClaimed(allClaimed);
+
+            if (allClaimed) {
+              setMessage({
+                type: 'info',
+                text: 'All airdrops have already been claimed for this wallet.',
+              });
+            } else if (claimed.length > 0) {
+              const totalAmount = proof.proofs
+                .filter((p) => !claimedPhaseNumbers.includes(p.phase))
+                .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+              setMessage({
+                type: 'info',
+                text: `Found ${proof.proofs.length - claimed.length} unclaimed airdrop phase(s) with total ${(totalAmount / LAMPORTS_PER_SOL).toLocaleString()} tokens available to claim! (${claimed.length} phase(s) already claimed)`,
+              });
+            } else {
+              const totalAmount = proof.proofs.reduce((sum, p) => {
+                return sum + (p.amount || 0);
+              }, 0);
+
+              setMessage({
+                type: 'info',
+                text: `Found ${proof.proofs.length} airdrop phase(s) with total ${(totalAmount / LAMPORTS_PER_SOL).toLocaleString()} tokens available to claim!`,
+              });
+            }
           } else {
             setMessage({
               type: 'info',
@@ -132,6 +169,8 @@ const Home: FC = () => {
         // Reset when wallet disconnects
         setProofData(null);
         setMessage(null);
+        setIsAlreadyClaimed(false);
+        setClaimedPhases([]);
       }
     };
 
@@ -205,8 +244,10 @@ const Home: FC = () => {
         <div className="flex flex-col items-center gap-6 mt-10 w-full max-w-2xl">
           <h1 className="text-3xl font-bold">Solana Airdrop</h1>
 
+          {/* Wallet connection button */}
           <WalletMultiButton className="!btn-primary" />
 
+          {/* display messages */}
           {message && (
             <div
               className={`alert w-full ${
@@ -259,6 +300,7 @@ const Home: FC = () => {
             </div>
           )}
 
+          {/* Connected wallet information */}
           {connected && publicKey && (
             <div className="mt-4 p-4 bg-base-200 rounded-lg w-full">
               <p className="text-sm text-gray-600 mb-2">
@@ -281,10 +323,10 @@ const Home: FC = () => {
                     <div className="stat">
                       <div className="stat-title">Total Claimable</div>
                       <div className="stat-value text-primary">
-                        {proofData.proofs.reduce(
-                          (sum, p) => sum + (p.amount || 0),
-                          0,
-                        ) / LAMPORTS_PER_SOL}
+                        {proofData.proofs
+                          .filter((p) => !claimedPhases.includes(p.phase))
+                          .reduce((sum, p) => sum + (p.amount || 0), 0) /
+                          LAMPORTS_PER_SOL}
                       </div>
                       <div className="stat-desc">Tokens</div>
                     </div>
@@ -292,22 +334,37 @@ const Home: FC = () => {
                     <div className="stat">
                       <div className="stat-title">Airdrop Phases</div>
                       <div className="stat-value">
-                        {proofData.proofs.length}
+                        {
+                          proofData.proofs.filter(
+                            (p) => !claimedPhases.includes(p.phase),
+                          ).length
+                        }
+                        {claimedPhases.length > 0 && (
+                          <span className="text-sm ml-2">
+                            / {proofData.proofs.length}
+                          </span>
+                        )}
                       </div>
-                      <div className="stat-desc">Available to claim</div>
+                      <div className="stat-desc">
+                        {claimedPhases.length > 0
+                          ? `${claimedPhases.length} already claimed`
+                          : 'Available to claim'}
+                      </div>
                     </div>
                   </div>
 
                   <button
                     className="btn btn-primary w-full"
                     onClick={doClaim}
-                    disabled={isLoading}
+                    disabled={isLoading || isAlreadyClaimed}
                   >
                     {isLoading ? (
                       <>
                         <span className="loading loading-spinner"></span>
                         Processing...
                       </>
+                    ) : isAlreadyClaimed ? (
+                      'Already Claimed'
                     ) : (
                       'Claim Airdrop'
                     )}
