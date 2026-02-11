@@ -22,8 +22,6 @@ import {
   CLAIM_RECORD_SEEDS,
   ProgramID,
   TokenProgramId,
-  AirdropTokenMint,
-  LutAddressMap,
 } from '../constants';
 
 // Actual format of the JSON file
@@ -136,9 +134,13 @@ export const useAirdropClaimOnSolana = () => {
   const claimWithoutSignature = async ({
     receiverAddress,
     proofInfo,
+    lutAddress,
+    airdropTokenMint,
   }: {
     receiverAddress: string;
     proofInfo: AirdropProof;
+    lutAddress: PublicKey;
+    airdropTokenMint: PublicKey;
   }) => {
     if (!publicKey) {
       return;
@@ -149,12 +151,19 @@ export const useAirdropClaimOnSolana = () => {
       connection,
     });
 
+    const tokenAccountInfo = await connection.getAccountInfo(airdropTokenMint);
+    if (!tokenAccountInfo) {
+      console.log('token account info not fetch');
+      return;
+    }
+    const tokenProgramId = tokenAccountInfo.owner;
+
     try {
       const userTokenVault = getAssociatedTokenAddressSync(
-        AirdropTokenMint,
+        airdropTokenMint,
         publicKey,
         true,
-        TOKEN_2022_PROGRAM_ID,
+        tokenProgramId,
       );
 
       const txSignatureList = [];
@@ -165,14 +174,14 @@ export const useAirdropClaimOnSolana = () => {
         const currentProof = proofInfo.proofs[i];
         const phase = new BN(currentProof.phase);
         const lookupTableAccountResponse =
-          await connection.getAddressLookupTable(LutAddressMap[phase]);
+          await connection.getAddressLookupTable(lutAddress);
 
         const lookupTableAccount: AddressLookupTableAccount | null =
           lookupTableAccountResponse.value;
 
         if (!lookupTableAccount) {
           throw new Error(
-            `Unable to find address lookup table on-chain: ${LutAddressMap[phase].toBase58()}`,
+            `Unable to find address lookup table on-chain: ${lutAddress.toBase58()}`,
           );
         }
 
@@ -180,16 +189,16 @@ export const useAirdropClaimOnSolana = () => {
           [
             MERKLE_ROOT_SEEDS,
             phase.toArrayLike(Buffer, 'le', 1),
-            AirdropTokenMint.toBuffer(),
+            airdropTokenMint.toBuffer(),
           ],
           program.programId,
         );
 
         const merkleTokenVault = getAssociatedTokenAddressSync(
-          AirdropTokenMint,
+          airdropTokenMint,
           merkleRoot,
           true,
-          TOKEN_2022_PROGRAM_ID,
+          tokenProgramId,
         );
 
         const [claimRecord] = PublicKey.findProgramAddressSync(
@@ -197,7 +206,7 @@ export const useAirdropClaimOnSolana = () => {
             CLAIM_RECORD_SEEDS,
             phase.toArrayLike(Buffer, 'le', 1),
             publicKey.toBuffer(),
-            AirdropTokenMint.toBuffer(),
+            airdropTokenMint.toBuffer(),
           ],
           program.programId,
         );
@@ -224,14 +233,14 @@ export const useAirdropClaimOnSolana = () => {
           )
           .accounts({
             signer: publicKey,
-            airdropTokenMint: AirdropTokenMint,
+            airdropTokenMint: airdropTokenMint,
             receiver: publicKey,
             merkleRoot: merkleRoot,
             merkleTokenVault: merkleTokenVault,
             userTokenVault: userTokenVault,
-            claimRecord: claimRecord,
+            claimAirdropRecord: claimRecord,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            tokenProgram: tokenProgramId,
             systemProgram: SystemProgram.programId,
           })
           .instruction();
@@ -247,25 +256,50 @@ export const useAirdropClaimOnSolana = () => {
         }).compileToV0Message([lookupTableAccount]);
         const versionedTx = new VersionedTransaction(messageV0);
 
-        // Send transaction using Privy's sendTransaction
-        const receipt = await sendTransaction(versionedTx, connection);
+        try {
+          console.log('--- Simulating transaction ---');
+          const simulation = await connection.simulateTransaction(versionedTx);
+          if (simulation.value.err) {
+            console.error('❌ Simulation failed!');
+            console.error('Error:', simulation.value.err);
+            console.log('📜 Complete program logs:');
+            simulation.value.logs?.forEach((log, i) =>
+              console.log(`[${i}] ${log}`),
+            );
+          } else {
+            console.log(
+              '✅ Simulation successful! Logs:',
+              simulation.value.logs,
+            );
+          }
+        } catch (simError) {
+          console.error('Error during simulation:', simError);
+        }
 
-        txSignatureList.push(receipt);
+        // Send transaction and get signature
+        const signature = await sendTransaction(versionedTx, connection, {
+          skipPreflight: true,
+        });
+        console.log(`Claim transaction sent: ${signature}`);
+
+        txSignatureList.push(signature);
       }
 
       return txSignatureList;
     } catch (error: any) {
-      console.error(error);
-      return null;
+      console.error('Claim error:', error);
+      throw error;
     }
   };
 
   const checkClaimed = async ({
     phase,
     ownerAddress,
+    airdropTokenMint,
   }: {
     phase: number;
     ownerAddress: PublicKey;
+    airdropTokenMint: PublicKey;
   }) => {
     if (!publicKey) {
       return;
@@ -281,7 +315,7 @@ export const useAirdropClaimOnSolana = () => {
         CLAIM_RECORD_SEEDS,
         new BN(phase).toArrayLike(Buffer, 'le', 1),
         ownerAddress.toBuffer(),
-        AirdropTokenMint.toBuffer(),
+        airdropTokenMint.toBuffer(),
       ],
       program.programId,
     );
@@ -306,9 +340,13 @@ export const useAirdropClaimOnSolana = () => {
   const claimAirdropWithReceiver = async ({
     proofInfo,
     signedData,
+    lutAddress,
+    airdropTokenMint,
   }: {
     proofInfo: AirdropProof;
     signedData: SolSignedData[];
+    lutAddress: PublicKey;
+    airdropTokenMint: PublicKey;
   }) => {
     if (!publicKey) {
       return;
@@ -319,11 +357,18 @@ export const useAirdropClaimOnSolana = () => {
       connection,
     });
 
+    const tokenAccountInfo = await connection.getAccountInfo(airdropTokenMint);
+    if (!tokenAccountInfo) {
+      console.log('token account info not fetch');
+      return;
+    }
+    const tokenProgramId = tokenAccountInfo.owner;
+
     const userTokenVault = getAssociatedTokenAddressSync(
-      AirdropTokenMint,
+      airdropTokenMint,
       publicKey,
       true,
-      TokenProgramId,
+      tokenProgramId,
     );
     // console.log('userTokenVault: ', userTokenVault.toBase58());
 
@@ -340,22 +385,22 @@ export const useAirdropClaimOnSolana = () => {
       const phase = new BN(proof.phase);
 
       // console.log('Fetching address lookup table account from chain...');
-      const lookupTableAccountResponse = await connection.getAddressLookupTable(
-        LutAddressMap[phase],
-      );
+      const lookupTableAccountResponse =
+        await connection.getAddressLookupTable(lutAddress);
 
       const lookupTableAccount: AddressLookupTableAccount | null =
         lookupTableAccountResponse.value;
 
       if (!lookupTableAccount) {
         throw new Error(
-          `Unable to find address lookup table on-chain: ${LutAddressMap[phase].toBase58()}`,
+          `Unable to find address lookup table on-chain: ${lutAddress.toBase58()}`,
         );
       }
 
       const claimed = await checkClaimed({
         phase,
         ownerAddress: signed.signer,
+        airdropTokenMint,
       });
 
       console.log('check claimed', phase.toNumber(), claimed);
@@ -368,7 +413,7 @@ export const useAirdropClaimOnSolana = () => {
         [
           MERKLE_ROOT_SEEDS,
           phase.toArrayLike(Buffer, 'le', 1),
-          AirdropTokenMint.toBuffer(),
+          airdropTokenMint.toBuffer(),
         ],
         program.programId,
       );
@@ -389,10 +434,10 @@ export const useAirdropClaimOnSolana = () => {
       );
 
       const merkleTokenVault = getAssociatedTokenAddressSync(
-        AirdropTokenMint,
+        airdropTokenMint,
         merkleRoot,
         true,
-        TOKEN_2022_PROGRAM_ID,
+        tokenProgramId,
       );
       console.log('merkleTokenVault: ', merkleTokenVault.toBase58());
 
@@ -401,7 +446,7 @@ export const useAirdropClaimOnSolana = () => {
           CLAIM_RECORD_SEEDS,
           phase.toArrayLike(Buffer, 'le', 1),
           signed.signer.toBuffer(),
-          AirdropTokenMint.toBuffer(),
+          airdropTokenMint.toBuffer(),
         ],
         program.programId,
       );
@@ -447,14 +492,14 @@ export const useAirdropClaimOnSolana = () => {
         )
         .accounts({
           signer: publicKey,
-          airdropTokenMint: AirdropTokenMint,
+          airdropTokenMint: airdropTokenMint,
           merkleRoot: merkleRoot,
           merkleTokenVault: merkleTokenVault,
           userTokenVault: userTokenVault,
           claimRecord: claimRecord,
           ixSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          tokenProgram: tokenProgramId,
           systemProgram: SystemProgram.programId,
         })
         .instruction();

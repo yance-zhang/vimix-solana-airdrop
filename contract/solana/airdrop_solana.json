@@ -470,6 +470,19 @@
           "signer": true
         },
         {
+          "name": "global",
+          "writable": false,
+          "signer": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [103, 108, 111, 98, 97, 108, 95, 99, 111, 110, 102]
+              }
+            ]
+          }
+        },
+        {
           "name": "airdrop_token_mint"
         },
         {
@@ -525,6 +538,19 @@
           "name": "admin",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "global",
+          "writable": false,
+          "signer": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [103, 108, 111, 98, 97, 108, 95, 99, 111, 110, 102]
+              }
+            ]
+          }
         },
         {
           "name": "airdrop_token_mint"
