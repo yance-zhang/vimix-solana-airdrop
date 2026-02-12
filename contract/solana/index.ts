@@ -24,7 +24,10 @@ import {
   TokenProgramId,
 } from '../constants';
 
-// Actual format of the JSON file
+/**
+ * Structure representing the actual format of the merkle proof JSON file
+ * Contains the merkle root and mapping of wallet addresses to their proof data
+ */
 export type MerkleProofData = {
   merkle_root: string;
   leaves: {
@@ -35,7 +38,10 @@ export type MerkleProofData = {
   };
 };
 
-// Original AirdropProof type (backward compatible)
+/**
+ * Original AirdropProof type for backward compatibility
+ * Contains user's total airdrop allocation, claim status, and proof data for multiple phases
+ */
 export type AirdropProof = {
   address: string;
   total: number;
@@ -57,6 +63,10 @@ export type AirdropProof = {
   error?: string;
 };
 
+/**
+ * Creates a new transaction with compute unit price and limit settings
+ * @returns Transaction configured with 1,000,000 compute units and 30000 micro-lamports price
+ */
 export function newTransactionWithComputeUnitPriceAndLimit(): Transaction {
   return new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({
@@ -68,6 +78,10 @@ export function newTransactionWithComputeUnitPriceAndLimit(): Transaction {
   );
 }
 
+/**
+ * Structure containing signed data for claim verification
+ * Includes signer's public key, message data, signature, proof, and expiration time
+ */
 export type SolSignedData = {
   signer: PublicKey;
   data: Uint8Array;
@@ -76,16 +90,35 @@ export type SolSignedData = {
   expireAt: number;
 };
 
+/**
+ * React hook that provides airdrop claim functionality on Solana
+ * Handles wallet connection, transaction signing, and claim verification
+ * @returns Object containing claim functions: claimWithoutSignature, checkClaimed, claimAirdropWithReceiver, signClaimReward
+ */
 export const useAirdropClaimOnSolana = () => {
   const { publicKey, sendTransaction, signMessage, signTransaction } =
     useWallet();
   const { connection } = useConnection();
 
+  /**
+   * Computes SHA-256 hash of the input data
+   * @param input - Byte array to hash
+   * @returns SHA-256 hash as Uint8Array
+   */
   async function sha256(input: Uint8Array): Promise<Uint8Array> {
     const hash = await crypto.subtle.digest('SHA-256', input as any);
     return new Uint8Array(hash);
   }
 
+  /**
+   * Signs a claim reward request with the user's wallet
+   * Creates a verifiable signature for claiming airdrop to a specific receiver
+   * @param proof - Buffer containing the merkle proof
+   * @param receiver - Public key of the receiver address
+   * @param expireAt - Unix timestamp when the signature expires
+   * @returns SolSignedData containing signature and related data
+   * @throws Error if sign message function is unavailable or required parameters are missing
+   */
   async function signClaimReward(
     proof: Buffer,
     receiver: PublicKey,
@@ -131,6 +164,16 @@ export const useAirdropClaimOnSolana = () => {
     };
   }
 
+  /**
+   * Claims airdrop directly to the connected wallet without additional signature
+   * Processes all phases in the proof info and submits transactions
+   * @param receiverAddress - Address that will receive the airdrop
+   * @param proofInfo - AirdropProof containing claim details and merkle proofs
+   * @param lutAddress - Address of the lookup table for efficient address storage
+   * @param airdropTokenMint - Mint address of the token being airdropped
+   * @returns Array of transaction signatures for each claim
+   * @throws Error if account is already claimed or transaction fails
+   */
   const claimWithoutSignature = async ({
     receiverAddress,
     proofInfo,
@@ -211,7 +254,7 @@ export const useAirdropClaimOnSolana = () => {
           program.programId,
         );
 
-        // use claimRecord to check if already claimed
+        // Check if airdrop has already been claimed using the claim record PDA
         const accountInfo = await connection.getAccountInfo(
           new PublicKey(claimRecord),
         );
@@ -224,7 +267,7 @@ export const useAirdropClaimOnSolana = () => {
         );
         const proofBuf = Buffer.concat(proof);
 
-        // create claim instruction
+        // Create the claim airdrop instruction with phase, amount, and proof
         const inst = await program.methods
           .claimAirdrop(
             phase,
@@ -248,7 +291,7 @@ export const useAirdropClaimOnSolana = () => {
 
         const { blockhash } = await connection.getLatestBlockhash();
 
-        // convert to versioned transaction to reduce size
+        // Convert to versioned transaction with lookup table to reduce transaction size
         const messageV0 = new TransactionMessage({
           payerKey: publicKey,
           recentBlockhash: blockhash,
@@ -276,7 +319,7 @@ export const useAirdropClaimOnSolana = () => {
           console.error('Error during simulation:', simError);
         }
 
-        // Send transaction and get signature
+        // Send the versioned transaction and get the signature
         const signature = await sendTransaction(versionedTx, connection, {
           skipPreflight: true,
         });
@@ -292,6 +335,13 @@ export const useAirdropClaimOnSolana = () => {
     }
   };
 
+  /**
+   * Checks if an airdrop has already been claimed for a specific phase and address
+   * @param phase - Airdrop phase number to check
+   * @param ownerAddress - Public key of the owner to check claim status for
+   * @param airdropTokenMint - Mint address of the airdrop token
+   * @returns true if already claimed, false otherwise
+   */
   const checkClaimed = async ({
     phase,
     ownerAddress,
@@ -325,18 +375,29 @@ export const useAirdropClaimOnSolana = () => {
       claimRecordBump,
     );
 
-    // use claimRecord to check if already claimed
+    // Use the claim record PDA to verify if the airdrop was already claimed
     const accountInfo = await connection.getAccountInfo(
       new PublicKey(claimRecord),
     );
     if (accountInfo) {
-      // addToast('Account Already claimed', 'warning');
+      // Account already claimed
       return true;
     } else {
       return false;
     }
   };
 
+  /**
+   * Claims airdrop with a custom receiver address using signed data
+   * Allows claiming to a different address than the connected wallet
+   * Verifies Ed25519 signature before processing the claim
+   * @param proofInfo - AirdropProof containing claim details and merkle proofs
+   * @param signedData - Array of SolSignedData with signatures for each phase
+   * @param lutAddress - Address of the lookup table for efficient address storage
+   * @param airdropTokenMint - Mint address of the token being airdropped
+   * @returns Array of transaction signatures for each successful claim
+   * @throws Error if lookup table not found or transaction fails
+   */
   const claimAirdropWithReceiver = async ({
     proofInfo,
     signedData,
@@ -370,13 +431,11 @@ export const useAirdropClaimOnSolana = () => {
       true,
       tokenProgramId,
     );
-    // console.log('userTokenVault: ', userTokenVault.toBase58());
+    // User's associated token account for receiving airdrop tokens
 
+    // Instruction index for signature verification (after compute budget instructions)
     let verifyInstIdx = 2;
     const txSignatureList = [];
-
-    // console.log('signedData: ', signedData);
-    // console.log('proofInfo: ', proofInfo);
 
     for (let i = 0; i < proofInfo.proofs.length; i++) {
       let tx = newTransactionWithComputeUnitPriceAndLimit();
@@ -384,7 +443,7 @@ export const useAirdropClaimOnSolana = () => {
       const signed = signedData[i];
       const phase = new BN(proof.phase);
 
-      // console.log('Fetching address lookup table account from chain...');
+      // Fetch the address lookup table from the chain for transaction compression
       const lookupTableAccountResponse =
         await connection.getAddressLookupTable(lutAddress);
 
@@ -405,6 +464,7 @@ export const useAirdropClaimOnSolana = () => {
 
       console.log('check claimed', phase.toNumber(), claimed);
 
+      // Skip this phase if already claimed
       if (claimed) {
         continue;
       }
@@ -456,7 +516,7 @@ export const useAirdropClaimOnSolana = () => {
         claimRecordBump,
       );
 
-      // use claimRecord to check if already claimed
+      // Verify if claim record already exists (already claimed)
       const accountInfo = await connection.getAccountInfo(
         new PublicKey(claimRecord),
       );
@@ -469,17 +529,20 @@ export const useAirdropClaimOnSolana = () => {
         return;
       }
 
+      // Create Ed25519 signature verification instruction to validate the signed claim
+      // This instruction verifies that the signature was created by the signer's private key
+      // The on-chain program will check this instruction to ensure claim authorization
       const verifySignInst = web3.Ed25519Program.createInstructionWithPublicKey(
         {
-          publicKey: signed.signer.toBytes(),
-          message: signed.data,
-          signature: signed.signature,
+          publicKey: signed.signer.toBytes(), // Public key that allegedly signed the message
+          message: signed.data, // The original message that was signed (dataHash)
+          signature: signed.signature, // The Ed25519 signature to verify
         },
       );
 
       tx.add(verifySignInst);
 
-      // create claim instruction
+      // Create the claim instruction with receiver, verifying the signature on-chain
       const inst = await program.methods
         .claimAirdropWithReceiver(
           phase,
@@ -507,7 +570,7 @@ export const useAirdropClaimOnSolana = () => {
 
       const { blockhash } = await connection.getLatestBlockhash();
 
-      // convert to versioned transaction to reduce size
+      // Convert to versioned transaction with lookup table to reduce transaction size
       const messageV0 = new TransactionMessage({
         payerKey: publicKey,
         recentBlockhash: blockhash,
@@ -518,7 +581,7 @@ export const useAirdropClaimOnSolana = () => {
       let txSignature = '';
 
       try {
-        // Send transaction
+        // Send the versioned transaction to the blockchain
         txSignature = await sendTransaction(versionedTx, connection, {
           skipPreflight: true,
         });
@@ -527,7 +590,7 @@ export const useAirdropClaimOnSolana = () => {
         txSignatureList.push(txSignature);
       } catch (error: any) {
         console.error(error);
-        // Handle SendTransactionError and fetch logs
+        // Handle transaction errors and fetch detailed logs for debugging
         if (error.name === 'SendTransactionError') {
           const txError = error as TransactionError;
           const logs = await connection.getTransaction(txSignature, {

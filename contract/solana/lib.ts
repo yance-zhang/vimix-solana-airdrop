@@ -17,6 +17,13 @@ import {
 import { MERKLE_ROOT_SEEDS, ProgramID } from '../constants';
 import Decimal from 'decimal.js';
 
+/**
+ * Get the PDA (Program Derived Address) for an airdrop pool
+ * @param phase - The phase number of the airdrop
+ * @param tokenMint - The mint address of the token to be airdropped
+ * @param programID - The program ID
+ * @returns The PDA and bump seed for the airdrop pool
+ */
 function getAirdropPoolAddress(
   phase: anchor.BN,
   tokenMint: PublicKey,
@@ -32,7 +39,18 @@ function getAirdropPoolAddress(
   );
 }
 
-// 创建一个新的空投池
+/**
+ * Create a new airdrop pool
+ * This function initializes a new airdrop pool with a merkle root for verification,
+ * creates a lookup table for efficient address storage, and optionally deposits tokens
+ * @param params.connection - Solana RPC connection
+ * @param params.phaseN - Phase number for this airdrop
+ * @param params.tokenMint - Token mint address to be airdropped
+ * @param params.operator - Admin/operator public key
+ * @param params.merkleRoot - Merkle root for claim verification
+ * @param params.depositAmount - Initial token deposit amount
+ * @returns Transaction and lookup table address
+ */
 async function CreateAirdropPool(params: {
   connection: Connection;
   phaseN: number;
@@ -47,7 +65,7 @@ async function CreateAirdropPool(params: {
     params.tokenMint,
   );
   if (!tokenAccountInfo) {
-    console.log('token account info not fetch');
+    console.log('Failed to fetch token account info');
     return;
   }
   const tokenProgramId = tokenAccountInfo.owner;
@@ -85,11 +103,12 @@ async function CreateAirdropPool(params: {
 
   let tx = new Transaction();
 
+  // Addresses to store in the lookup table for efficient access
   const addressesToStore = [
     params.tokenMint,
     airdropPool,
     airdropPoolTokenVault,
-    // 常用程序地址
+    // Common program addresses
     anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
     ASSOCIATED_TOKEN_PROGRAM_ID,
     tokenProgramId,
@@ -103,9 +122,9 @@ async function CreateAirdropPool(params: {
     });
   tx.add(lookupTableInst);
 
-  console.log('新创建的 LUT 地址:', lookupTableAddress.toBase58());
+  console.log('Newly created LUT address:', lookupTableAddress.toBase58());
 
-  // 3. 创建一个向 LUT 添加地址的指令
+  // Create instruction to add addresses to the lookup table
   const extendInst = AddressLookupTableProgram.extendLookupTable({
     payer: params.operator,
     authority: params.operator,
@@ -114,7 +133,7 @@ async function CreateAirdropPool(params: {
   });
   tx.add(extendInst);
 
-  // initialize global state
+  // Initialize airdrop pool with merkle root
   const inst = await program.methods
     .initMerkleRoot(phase, params.merkleRoot)
     .accounts({
@@ -129,7 +148,7 @@ async function CreateAirdropPool(params: {
     .instruction();
   tx.add(inst);
 
-  // 如果 deposit amount 大于 1，增加一个转账的指令
+  // If deposit amount is greater than 1, add a transfer instruction
   const depositAmountD = new Decimal(params.depositAmount);
   if (depositAmountD.greaterThan(1)) {
     const userTokenVault = getAssociatedTokenAddressSync(
@@ -140,7 +159,7 @@ async function CreateAirdropPool(params: {
     );
 
     tx.add(
-      // trasnfer token
+      // Transfer tokens to the airdrop pool vault
       createTransferInstruction(
         userTokenVault,
         airdropPoolTokenVault,
@@ -158,7 +177,16 @@ async function CreateAirdropPool(params: {
   };
 }
 
-// 更新已经有池子的 merkle root
+/**
+ * Update the merkle root of an existing airdrop pool
+ * This allows the admin to update eligibility criteria for an existing airdrop
+ * @param params.connection - Solana RPC connection
+ * @param params.phaseN - Phase number of the airdrop pool
+ * @param params.tokenMint - Token mint address
+ * @param params.operator - Admin/operator public key
+ * @param params.merkleRoot - New merkle root for claim verification
+ * @returns Transaction to update the merkle root
+ */
 async function UpdateAirdropPoolMerkleRoot(params: {
   connection: Connection;
   phaseN: number;
@@ -178,7 +206,7 @@ async function UpdateAirdropPoolMerkleRoot(params: {
     params.tokenMint,
   );
   if (!tokenAccountInfo) {
-    console.log('token account info not fetch');
+    console.log('Failed to fetch token account info');
     return;
   }
   const tokenProgramId = tokenAccountInfo.owner;
@@ -202,7 +230,7 @@ async function UpdateAirdropPoolMerkleRoot(params: {
 
   let tx = new Transaction();
 
-  // initialize global state
+  // Create instruction to update merkle root
   const inst = await program.methods
     .updateMerkleRoot(phase, params.merkleRoot)
     .accounts({
@@ -220,7 +248,15 @@ async function UpdateAirdropPoolMerkleRoot(params: {
   return tx;
 }
 
-// 提取池子里剩下的全部资金
+/**
+ * Withdraw all unclaimed tokens from an airdrop pool
+ * This allows the admin to recover tokens that were not claimed during the airdrop period
+ * @param params.connection - Solana RPC connection
+ * @param params.phaseN - Phase number of the airdrop pool
+ * @param params.tokenMint - Token mint address
+ * @param params.operator - Admin/operator public key
+ * @returns Transaction to withdraw unclaimed tokens
+ */
 async function withdrawUnclaimedTokens(params: {
   connection: Connection;
   phaseN: number;
@@ -232,7 +268,7 @@ async function withdrawUnclaimedTokens(params: {
     params.tokenMint,
   );
   if (!tokenAccountInfo) {
-    console.log('token account info not fetch');
+    console.log('Failed to fetch token account info');
     return;
   }
   const tokenProgramId = tokenAccountInfo.owner;
@@ -274,6 +310,7 @@ async function withdrawUnclaimedTokens(params: {
 
   let tx = new Transaction();
 
+  // Create instruction to withdraw unclaimed tokens
   const inst = await program.methods
     .withdrawUnclaimedTokens(phase)
     .accounts({
