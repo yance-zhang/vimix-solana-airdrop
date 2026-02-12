@@ -363,6 +363,9 @@ const Home: FC = () => {
         <div className="flex flex-col items-center gap-6 mt-10 w-full max-w-2xl">
           <h1 className="text-3xl font-bold">Solana Airdrop</h1>
 
+          {/* connect wallet */}
+          <WalletMultiButton />
+
           {/* display messages */}
           {message && (
             <div
